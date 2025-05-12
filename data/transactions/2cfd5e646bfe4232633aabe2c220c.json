@@ -1,0 +1,8 @@
+{
+    "amount": 10.0,
+    "description": "test",
+    "timestamp": "1745658288",
+    "transaction_id": "2cfd5e646bfe4232633aabe2c220c",
+    "type": "debit",
+    "wallet_id": "ac09aa62bdee9dea633a4262c92f2"
+}
