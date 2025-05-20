@@ -1,6 +1,8 @@
 #include "services/WalletService.h"
 #include "storage/WalletStorage.h"
 #include "storage/TransactionStorage.h"
+#include "storage/UserStorage.h"
+#include "models/UserAccount.h"
 
 #include <chrono>
 #include <random>
@@ -10,6 +12,15 @@
 namespace services {
 
 std::optional<std::string> WalletService::createWallet(const std::string& username) {
+    // Check if user already has a wallet
+    auto userOpt = storage::UserStorage::load(username);
+    if (!userOpt) return std::nullopt;
+    
+    auto user = *userOpt;
+    if (!user.wallet_id.empty()) {
+        return std::nullopt;  // User already has a wallet
+    }
+
     // Generate unique wallet ID
     std::random_device rd;
     std::mt19937_64 eng(rd());
@@ -23,6 +34,15 @@ std::optional<std::string> WalletService::createWallet(const std::string& userna
     models::Wallet wallet(walletId, username, 0.0);
     bool ok = storage::WalletStorage::save(wallet);
     if (!ok) return std::nullopt;
+
+    // Update user's wallet_id
+    user.wallet_id = walletId;
+    if (!storage::UserStorage::save(user)) {
+        // If we can't update the user, delete the wallet
+        std::filesystem::remove("data/wallets/" + walletId + ".json");
+        return std::nullopt;
+    }
+
     return walletId;
 }
 

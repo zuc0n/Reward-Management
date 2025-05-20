@@ -86,11 +86,20 @@ ApiResponse ApiRouter::deleteUser(const std::string& token) {
 ApiResponse ApiRouter::createWallet(const std::string& token) {
     auto userOpt = auth::AuthService::validateToken(token);
     if (!userOpt) return ApiResponse{false, "Authentication failed", {}};
+    
     auto walletOpt = services::WalletService::createWallet(*userOpt);
-    if (!walletOpt) return ApiResponse{false, "Create wallet failed", {}};
+    if (!walletOpt) {
+        // Check if user already has a wallet
+        auto user = services::UserService::getProfile(*userOpt);
+        if (user && !user->wallet_id.empty()) {
+            return ApiResponse{false, "Wallet already exists for this user", {}};
+        }
+        return ApiResponse{false, "Failed to create wallet", {}};
+    }
+    
     nlohmann::json data;
     data["walletId"] = *walletOpt;
-    return ApiResponse{true, "Wallet created", data};
+    return ApiResponse{true, "Wallet created successfully", data};
 }
 
 ApiResponse ApiRouter::getWallet(const std::string& token,
