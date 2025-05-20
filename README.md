@@ -2,6 +2,10 @@
 
 A C++ CLI application for user and wallet management with file-based storage, authentication, and 2FA.
 
+## Contributors
+- Pham Thanh Cong - K24DTCN504
+- Tran Cong Ty - K24DTCN247
+
 ## Overview
 
 - Client (CLI)
