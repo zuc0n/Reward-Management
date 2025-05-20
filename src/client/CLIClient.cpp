@@ -11,6 +11,7 @@
 #include <string>
 #include <limits>
 #include <algorithm>  // for std::transform in CLI validation
+#include <random>
 
 namespace client {
 
@@ -113,15 +114,7 @@ void CLIClient::run() {
             }
             switch (choice) {
                 case 1: {
-                    auto res = api::ApiRouter::getProfile(token);
-                    if (!res.success) {
-                        std::cout << "Error: " << res.message << "\n";
-                    } else {
-                        auto user = res.data["user"];
-                        std::cout << "Username: " << user["username"] << "\n";
-                        std::cout << "Email: " << user["email"] << "\n";
-                        std::cout << "Admin: " << (user["is_admin"].get<bool>() ? "Yes" : "No") << "\n";
-                    }
+                    showProfile(token);
                     break;
                 }
                 case 2: {
@@ -180,20 +173,10 @@ void CLIClient::run() {
                     break;
                 }
                 case 7: {
-                    std::string walletId, type, desc;
+                    std::string senderWalletId, recipientWalletId, type, desc;
                     double amount;
-                    std::cout << "Wallet ID: "; std::cin >> walletId;
-                    if (walletId.empty()) {
-                        std::cout << "Wallet ID cannot be empty\n";
-                        break;
-                    }
-                    std::cout << "Amount: "; std::cin >> amount;
-                    if (!std::cin || amount <= 0) {
-                        std::cin.clear();
-                        std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
-                        std::cout << "Amount must be a positive number\n";
-                        break;
-                    }
+                    
+                    // First ask for transaction type
                     std::cout << "Type (credit/debit): "; std::cin >> type;
                     // normalize
                     std::transform(type.begin(), type.end(), type.begin(), ::tolower);
@@ -201,10 +184,77 @@ void CLIClient::run() {
                         std::cout << "Type must be 'credit' or 'debit'\n";
                         break;
                     }
+
+                    // Get sender's wallet ID first
+                    auto profileRes = api::ApiRouter::getProfile(token);
+                    if (!profileRes.success || profileRes.data["user"]["wallet_id"].get<std::string>().empty()) {
+                        std::cout << "Error: You don't have a wallet yet\n";
+                        break;
+                    }
+                    senderWalletId = profileRes.data["user"]["wallet_id"].get<std::string>();
+
+                    // For debit transactions, ask for recipient's wallet ID
+                    if (type == "debit") {
+                        std::cout << "Recipient's Wallet ID: "; std::cin >> recipientWalletId;
+                        if (recipientWalletId.empty()) {
+                            std::cout << "Wallet ID cannot be empty\n";
+                            break;
+                        }
+                        // Check if recipient's wallet exists
+                        auto walletCheck = api::ApiRouter::getWallet(token, recipientWalletId);
+                        if (!walletCheck.success) {
+                            std::cout << "Error: Recipient's wallet not found\n";
+                            break;
+                        }
+                        std::cout << "Recipient's wallet found. Owner: " 
+                                 << walletCheck.data["wallet"]["owner_username"].get<std::string>() << "\n";
+                    }
+
+                    std::cout << "Amount: "; std::cin >> amount;
+                    if (!std::cin || amount <= 0) {
+                        std::cin.clear();
+                        std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+                        std::cout << "Amount must be a positive number\n";
+                        break;
+                    }
+
                     std::cout << "Description: ";
                     std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
                     std::getline(std::cin, desc);
-                    auto res = api::ApiRouter::executeTransaction(token, walletId, amount, type, desc);
+
+                    // Generate and verify OTP before proceeding with transaction
+                    std::string username = profileRes.data["user"]["username"].get<std::string>();
+                    
+                    // Generate a simple 6-digit OTP
+                    std::random_device rd;
+                    std::mt19937 gen(rd());
+                    std::uniform_int_distribution<> dis(0, 999999);
+                    std::string otp = std::to_string(dis(gen));
+                    // Pad with leading zeros if necessary
+                    otp = std::string(6 - otp.length(), '0') + otp;
+                    
+                    std::cout << "OTP for transaction verification: " << otp << "\n";
+                    std::cout << "Enter OTP to confirm transaction: ";
+                    std::string enteredOtp;
+                    std::cin >> enteredOtp;
+                    
+                    if (enteredOtp != otp) {
+                        std::cout << "Error: Invalid OTP. Transaction cancelled.\n";
+                        break;
+                    }
+
+                    // If OTP verification successful, proceed with transaction
+                    // For debit transactions, use sender's wallet
+                    // For credit transactions, also use sender's wallet (since it's a credit to their own wallet)
+                    auto res = api::ApiRouter::executeTransaction(token, senderWalletId, amount, type, desc);
+                    if (res.success && type == "debit") {
+                        // If debit was successful, credit the recipient's wallet
+                        auto creditRes = api::ApiRouter::executeTransaction(token, recipientWalletId, amount, "credit", 
+                            "Received from " + username);
+                        if (!creditRes.success) {
+                            std::cout << "Warning: Money was deducted but transfer to recipient failed\n";
+                        }
+                    }
                     std::cout << res.message << "\n";
                     break;
                 }
@@ -287,6 +337,23 @@ void CLIClient::run() {
                     std::cout << "Invalid choice\n";
             }
         }
+    }
+}
+
+void CLIClient::showProfile(const std::string& token) {
+    auto res = api::ApiRouter::getProfile(token);
+    if (!res.success) {
+        std::cout << "Error: " << res.message << "\n";
+        return;
+    }
+    auto user = res.data["user"];
+    std::cout << "Username: \"" << user["username"].get<std::string>() << "\"\n";
+    std::cout << "Email: \"" << user["email"].get<std::string>() << "\"\n";
+    std::cout << "Admin: " << (user["is_admin"].get<bool>() ? "Yes" : "No") << "\n";
+    if (!user["wallet_id"].get<std::string>().empty()) {
+        std::cout << "Wallet ID: \"" << user["wallet_id"].get<std::string>() << "\"\n";
+    } else {
+        std::cout << "Wallet: Not created yet\n";
     }
 }
 
